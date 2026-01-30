@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+slowapi
+pyjwt
+passlib
+bcrypt==4.0.1
+python-multipart
+email-validator
+dotenv
+kafka-python
+celery
+pika
+redis
