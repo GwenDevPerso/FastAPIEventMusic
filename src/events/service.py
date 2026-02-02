@@ -1,20 +1,34 @@
 from ..database.database import DbSession
 from .schemas import EventCreateRequest, EventReadResponse
 from .models import Event, EventStatus
-from src.exceptions import EventNotFoundError
-from uuid import UUID, uuid4
-from .tasks import process_event_audio
+from src.audios.models import Audio, AudioStatus
+from src.exceptions import AudioAlreadyAttachedError, AudioNotFoundError, AudioNotProcessedError
+from uuid import uuid4
 
 
-def create(db: DbSession, event: EventCreateRequest) -> EventReadResponse:
-    event = Event(id=uuid4(), name=event.name)
+def create(db: DbSession, event_request: EventCreateRequest) -> EventReadResponse:
+    event = Event(id=uuid4(), name=event_request.name, status=EventStatus.DRAFT)
     db.add(event)
+    db.commit()
+    db.refresh(event)
+
+    for audio_id in event_request.audio_ids:
+        audio = db.query(Audio).filter(Audio.id == audio_id).first()
+        if not audio:
+            raise AudioNotFoundError(audio_id)
+        if audio.status != AudioStatus.PROCESSED:
+            raise AudioNotProcessedError(audio_id)
+        if audio.event_id is not None:
+            raise AudioAlreadyAttachedError(audio_id)
+        audio.event_id = event.id
+
     db.commit()
     db.refresh(event)
     return EventReadResponse(
         id=event.id,
         name=event.name,
         status=event.status,
+        audio_ids=[audio.id for audio in event.audios],
         created_at=event.created_at,
         updated_at=event.updated_at,
     )
@@ -27,21 +41,9 @@ def get_all(db: DbSession) -> list[EventReadResponse]:
             id=event.id,
             name=event.name,
             status=event.status,
+            audio_ids=[audio.id for audio in event.audios],
             created_at=event.created_at,
             updated_at=event.updated_at,
         )
         for event in events
     ]
-
-
-def process(db: DbSession, event_id: UUID) -> dict:
-    event = db.query(Event).filter(Event.id == event_id).first()
-    if not event:
-        raise EventNotFoundError(event_id)
-    event.status = EventStatus.PROCESSING
-    db.commit()
-    db.refresh(event)
-
-    # Send task to process event audio to celery worker
-    process_event_audio.delay(event_id)
-    return {"status": "processing"}

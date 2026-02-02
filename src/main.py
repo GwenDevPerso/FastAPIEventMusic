@@ -8,6 +8,8 @@ from .exceptions import register_exception_handlers
 
 from .users.models import User  # noqa: F401
 from .auth.models import RefreshToken  # noqa: F401
+from .audios.models import Audio, TrackPlay  # noqa: F401
+from .events.models import Event  # noqa: F401
 
 configure_logging(LogLevels.info)
 

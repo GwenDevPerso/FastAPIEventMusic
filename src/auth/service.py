@@ -188,6 +188,7 @@ def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]) -> TokenData
     return verify_token(token)
 
 
+# type alias, when this is used in an endpoint, it will automatically call verify token
 CurrentUser = Annotated[TokenData, Depends(get_current_user)]
 
 

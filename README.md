@@ -1,42 +1,43 @@
 ┌─────────────┐
-│   Client    │ POST /events/{id}/process
+│   Client    │
 └──────┬──────┘
-       │
+       │ 1) Upload audio (multipart/form-data)
+       │    POST /audios/   (name, file)
        ▼
 ┌─────────────────┐
-│  FastAPI App    │ controller.process()
+│  FastAPI App    │ audios.controller.create()
 └──────┬──────────┘
-       │
        ▼
-┌─────────────────┐
-│  service.py     │ 1. Update DB: status = PROCESSING
-│  process()      │ 2. process_event_audio.delay()
-└──────┬──────────┘
+┌───────────────────────────┐
+│ audios.service.create()   │
+│ - INSERT audios           │  Audio.status = PROCESSING
+│ - COMMIT                  │
+│ - enqueue Celery task     │  process_audio.delay(audio_id)
+└──────┬────────────────────┘
        │
-       ├─────────────────┐
-       │                 │
-       ▼                 ▼
-┌─────────────┐   ┌──────────────┐
-│ PostgreSQL  │   │ Redis Broker │ ← Queue de tâches
-│   (Event)   │   └──────┬───────┘
-└─────────────┘          │
+       ├───────────────┐
+       │               │
+       ▼               ▼
+┌─────────────┐  ┌──────────────┐
+│ PostgreSQL  │  │ Redis Broker  │  (queue)
+│ tables:     │  └──────┬───────┘
+│ - audios    │         ▼
+│ - track_plays│  ┌──────────────┐
+│ - events    │  │ Celery Worker │
+└─────────────┘  └──────┬───────┘
                          ▼
-                  ┌──────────────┐
-                  │Celery Worker │ ← Traite la tâche
-                  └──────┬───────┘
-                         │
-                         ▼
-                  ┌──────────────┐
-                  │  tasks.py    │ process_event_audio()
-                  │              │ - Traite audio
-                  │              │ - Crée TrackPlay
-                  └──────┬───────┘
-                         │
-                         ├─────────────────┐
-                         │                 │
-                         ▼                 ▼
-                  ┌─────────────┐  ┌──────────────┐
-                  │ PostgreSQL  │  │Redis Backend │ ← Résultat
-                  │ (TrackPlay) │  └──────────────┘
-                  └─────────────┘# FastAPIEventMusic
-# FastAPIEventMusic
+                  ┌──────────────────────┐
+                  │ audios.tasks         │
+                  │ process_audio(id):   │
+                  │ - SELECT audio       │
+                  │ - INSERT track_plays │
+                  │ - UPDATE audio       │  Audio.status = PROCESSED
+                  │ - COMMIT             │
+                  └──────────┬───────────┘
+                             │
+                             ▼
+                    ┌─────────────────┐
+                    │ Client polling  │
+                    │ GET /audios/{id}│ -> AudioReadResponse (status)
+                    └─────────────────┘
+
