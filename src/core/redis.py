@@ -6,6 +6,10 @@ from redis import Redis
 
 _redis_client: Redis | None = None
 
+CACHE_TTL_SECONDS = 300
+AUDIOS_LIST_CACHE_KEY = "audios:all"
+AUDIOS_LIST_CACHE_TTL_SECONDS = 60
+
 
 def get_redis() -> Redis:
     global _redis_client

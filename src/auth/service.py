@@ -4,7 +4,7 @@ from datetime import timedelta, datetime, timezone
 import hashlib
 import secrets
 from typing import Annotated
-from fastapi import Depends
+from fastapi import Depends, Cookie, Response
 from uuid import UUID, uuid4
 from passlib.context import CryptContext
 import jwt
@@ -15,18 +15,20 @@ from .models import RefreshToken
 from .schemas import (
     RegisterUserRequest,
     LoginRequest,
-    UserWithTokenResponse,
-    TokenResponse,
     UserResponse,
     TokenData,
 )
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import (
+    OAuth2PasswordBearer,
+    HTTPBearer,
+    HTTPAuthorizationCredentials,
+)
 from ..exceptions import AuthenticationError, UserAlreadyExistsError
 import logging
 import os
 
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-REFRESH_TOKEN_EXPIRE_DAYS = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 15
+REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 oauth2_bearer = OAuth2PasswordBearer(tokenUrl="auth/token")
 bcrypt_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -48,6 +50,7 @@ def authenticate_user(email: str, password: str, db: Session) -> User | bool:
     return user
 
 
+# TOKEN
 def create_access_token(email: str, user_id: UUID, expires_delta: timedelta) -> str:
     encode = {
         "sub": email,
@@ -85,7 +88,11 @@ def revoke_refresh_tokens_for_user(db: Session, user_id: UUID) -> None:
     db.commit()
 
 
-def refresh_access_token(db: Session, refresh_token: str) -> TokenResponse:
+def refresh_access_token(
+    db: Session, refresh_token: str | None, response: Response
+) -> dict[str, str]:
+    if not refresh_token:
+        raise AuthenticationError("Refresh token not found in cookies")
     now = datetime.now(timezone.utc)
     refresh_token_hash = _hash_refresh_token(refresh_token)
 
@@ -117,11 +124,25 @@ def refresh_access_token(db: Session, refresh_token: str) -> TokenResponse:
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(user.email, user.id, access_token_expires)
 
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=new_raw_refresh_token,
-        token_type="bearer",
+    # Set HttpOnly cookies
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=False,  # False for local dev, True for production
+        samesite="lax",
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
+    response.set_cookie(
+        key="refresh_token",
+        value=new_raw_refresh_token,
+        httponly=True,
+        secure=False,  # False for local dev, True for production
+        samesite="lax",
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+    )
+
+    return {"message": "Tokens refreshed"}
 
 
 def verify_token(token: str) -> TokenData:
@@ -138,9 +159,23 @@ def verify_token(token: str) -> TokenData:
         )
 
 
+_http_bearer = HTTPBearer(auto_error=False)
+
+
+def get_access_token(
+    access_token_cookie: str | None = Cookie(None),
+    authorization: HTTPAuthorizationCredentials | None = Depends(_http_bearer),
+) -> str | None:
+    if access_token_cookie:
+        return access_token_cookie
+    if authorization and authorization.credentials:
+        return authorization.credentials
+    return None
+
+
 def register_user(
-    db: Session, register_user_request: RegisterUserRequest
-) -> UserWithTokenResponse:
+    db: Session, response: Response, register_user_request: RegisterUserRequest
+) -> UserResponse:
     try:
         if db.query(User).filter(User.email == register_user_request.email).first():
             logging.warning(
@@ -165,34 +200,50 @@ def register_user(
         db.add(refresh_token)
         db.commit()
 
-        return UserWithTokenResponse(
-            user=UserResponse(
-                id=user.id,
-                email=user.email,
-                first_name=user.first_name,
-                last_name=user.last_name,
-                created_at=user.created_at,
-            ),
-            token=TokenResponse(
-                access_token=access_token,
-                refresh_token=raw_refresh_token,
-                token_type="bearer",
-            ),
+        response.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=True,
+            secure=False,
+            samesite="lax",
+            max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        )
+        response.set_cookie(
+            key="refresh_token",
+            value=raw_refresh_token,
+            httponly=True,
+            secure=False,
+            samesite="lax",
+            max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        )
+
+        return UserResponse(
+            id=user.id,
+            email=user.email,
+            first_name=user.first_name,
+            last_name=user.last_name,
+            created_at=user.created_at,
         )
     except Exception as e:
         logging.error(f"Error registering user: {e}")
         raise e
 
 
-def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]) -> TokenData:
-    return verify_token(token)
+def get_current_user(
+    access_token: Annotated[str | None, Depends(get_access_token)] = None,
+) -> TokenData:
+    if not access_token:
+        raise AuthenticationError("Access token not found")
+    return verify_token(access_token)
 
 
 # type alias, when this is used in an endpoint, it will automatically call verify token
 CurrentUser = Annotated[TokenData, Depends(get_current_user)]
 
 
-def login(login_request: LoginRequest, db: Session) -> UserWithTokenResponse:
+def login(
+    login_request: LoginRequest, db: Session, response: Response
+) -> UserResponse:
     user = authenticate_user(login_request.email, login_request.password, db)
     if not user:
         raise AuthenticationError("Invalid email or password")
@@ -204,17 +255,27 @@ def login(login_request: LoginRequest, db: Session) -> UserWithTokenResponse:
     db.add(refresh_token)
     db.commit()
 
-    return UserWithTokenResponse(
-        user=UserResponse(
-            id=user.id,
-            email=user.email,
-            first_name=user.first_name,
-            last_name=user.last_name,
-            created_at=user.created_at,
-        ),
-        token=TokenResponse(
-            access_token=access_token,
-            refresh_token=raw_refresh_token,
-            token_type="bearer",
-        ),
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=raw_refresh_token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+    )
+
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        created_at=user.created_at,
     )

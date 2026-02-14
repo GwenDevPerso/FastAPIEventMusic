@@ -16,9 +16,11 @@ class RefreshToken(Base):
     token_hash = Column(String, unique=True, index=True, nullable=False)
 
     created_at = Column(
-        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
     )
-    expires_at = Column(DateTime, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
 
-    revoked_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
     replaced_by_token_id = Column(UUID, nullable=True)

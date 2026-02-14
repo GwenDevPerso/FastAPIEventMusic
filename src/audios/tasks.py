@@ -4,11 +4,15 @@ from uuid import UUID
 import time
 
 from src.audios.models import Audio, AudioStatus, TrackPlay
+from src.core.redis import get_redis
+from src.core.redis import AUDIOS_LIST_CACHE_KEY
 
 
 @celery_app.task
 def process_audio(audio_id: str):
     db = SessionLocal()
+    redis = get_redis()
+    audio = None
     try:
         audio_uuid = UUID(audio_id)
         audio = db.query(Audio).filter(Audio.id == audio_uuid).first()
@@ -43,3 +47,4 @@ def process_audio(audio_id: str):
         raise e
     finally:
         db.close()
+        redis.delete(AUDIOS_LIST_CACHE_KEY)

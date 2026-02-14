@@ -16,17 +16,6 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str
-
-
-class UserWithTokenResponse(BaseModel):
-    user: UserResponse
-    token: TokenResponse
-
-
 class TokenData(BaseModel):
     user_id: Optional[str] = None
 

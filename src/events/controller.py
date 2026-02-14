@@ -14,5 +14,5 @@ async def create(event: EventCreateRequest, db: DbSession, current_user: Current
 
 
 @router.get("/", response_model=list[EventReadResponse])
-async def get_all(db: DbSession):
+async def get_all(db: DbSession, current_user: CurrentUser):
     return service.get_all(db)

@@ -2,7 +2,11 @@ from ..database.database import DbSession
 from .schemas import EventCreateRequest, EventReadResponse
 from .models import Event, EventStatus
 from src.audios.models import Audio, AudioStatus
-from src.exceptions import AudioAlreadyAttachedError, AudioNotFoundError, AudioNotProcessedError
+from src.exceptions import (
+    AudioAlreadyAttachedError,
+    AudioNotFoundError,
+    AudioNotProcessedError,
+)
 from uuid import uuid4
 
 

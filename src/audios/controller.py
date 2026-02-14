@@ -1,11 +1,12 @@
 from typing import Annotated
-
-from fastapi import APIRouter, File, Form, UploadFile
 from uuid import UUID
 
+from fastapi import APIRouter, File, Form, UploadFile
+
+from ..core.redis import RedisClient
 from ..database.database import DbSession
-from .schemas import AudioReadResponse
 from . import service
+from .schemas import AudioReadResponse
 from src.auth.service import CurrentUser
 
 router = APIRouter(prefix="/audios", tags=["audios"])
@@ -15,16 +16,17 @@ router = APIRouter(prefix="/audios", tags=["audios"])
 async def create(
     db: DbSession,
     current_user: CurrentUser,
+    redis: RedisClient,
     name: Annotated[str, Form(...)],
     file: Annotated[UploadFile, File(...)],
 ):
     file_bytes = await file.read()
-    return service.create(db=db, name=name, file=file_bytes)
+    return service.create(db=db, redis=redis, name=name, file=file_bytes)
 
 
 @router.get("/", response_model=list[AudioReadResponse])
-async def get_all(db: DbSession):
-    return service.get_all(db)
+async def get_all(db: DbSession, redis: RedisClient, current_user: CurrentUser):
+    return service.get_all(db=db, redis=redis)
 
 
 @router.get("/{audio_id}", response_model=AudioReadResponse)
